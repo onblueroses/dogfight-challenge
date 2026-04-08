@@ -1,8 +1,8 @@
 use dogfight_shared::*;
 use glam::Vec2;
 use rand::Rng;
-use rand_pcg::Pcg64;
 use rand::SeedableRng;
+use rand_pcg::Pcg64;
 
 /// Full simulation state for a 1v1 match.
 #[derive(Debug, Clone)]
@@ -20,12 +20,18 @@ pub struct SimState {
     pub obs_history_count: [u32; 2],
 }
 
+impl Default for SimState {
+    fn default() -> Self {
+        Self::new_with_config(SimConfig::default())
+    }
+}
+
 impl SimState {
     /// Default initial speed: above stall threshold for safe spawn.
     pub const SPAWN_SPEED: f32 = 50.0;
 
     pub fn new() -> Self {
-        Self::new_with_config(SimConfig::default())
+        Self::default()
     }
 
     pub fn new_with_config(config: SimConfig) -> Self {
@@ -198,8 +204,12 @@ impl SimState {
             let target = -std::f32::consts::FRAC_PI_2;
             let diff = {
                 let mut d = target - f.yaw;
-                while d > std::f32::consts::PI { d -= 2.0 * std::f32::consts::PI; }
-                while d < -std::f32::consts::PI { d += 2.0 * std::f32::consts::PI; }
+                while d > std::f32::consts::PI {
+                    d -= 2.0 * std::f32::consts::PI;
+                }
+                while d < -std::f32::consts::PI {
+                    d += 2.0 * std::f32::consts::PI;
+                }
                 d
             };
             let max_rot = STALL_NOSE_DOWN_RATE * DT;
@@ -209,7 +219,9 @@ impl SimState {
             // Only gravity and drag during stall (no thrust, no yaw input)
             f.speed += (-cfg.gravity * f.yaw.sin()) * DT;
             f.speed -= cfg.drag_coeff * f.speed * DT;
-            f.speed = f.speed.clamp(cfg.min_speed, cfg_effective_max_speed(&cfg, f.hp));
+            f.speed = f
+                .speed
+                .clamp(cfg.min_speed, cfg_effective_max_speed(&cfg, f.hp));
 
             // Early recovery: if speed recovers above STALL_SPEED + 10, clear stall
             if f.speed > STALL_SPEED + 10.0 {
@@ -256,7 +268,9 @@ impl SimState {
         f.speed += (-cfg.gravity * f.yaw.sin()) * DT;
 
         // Clamp speed (with damage penalty on max)
-        f.speed = f.speed.clamp(cfg.min_speed, cfg_effective_max_speed(&cfg, f.hp));
+        f.speed = f
+            .speed
+            .clamp(cfg.min_speed, cfg_effective_max_speed(&cfg, f.hp));
 
         // Compute forward vector and integrate position
         let forward = f.forward();
@@ -452,8 +466,8 @@ fn apply_boundaries(f: &mut FighterState) -> bool {
 
     // Ceiling: speed drain + hard clamp
     if f.position.y > ALT_BOUNDARY_HIGH {
-        let penetration =
-            ((f.position.y - ALT_BOUNDARY_HIGH) / (MAX_ALTITUDE - ALT_BOUNDARY_HIGH)).clamp(0.0, 1.0);
+        let penetration = ((f.position.y - ALT_BOUNDARY_HIGH) / (MAX_ALTITUDE - ALT_BOUNDARY_HIGH))
+            .clamp(0.0, 1.0);
         f.speed -= penetration * penetration * CEILING_SPEED_DRAIN * DT;
         if f.speed < MIN_SPEED {
             f.speed = MIN_SPEED;
@@ -599,12 +613,22 @@ mod tests {
 
         // Step enough to cross the boundary
         for _ in 0..20 {
-            state.step(&[Action { yaw_input: 0.0, throttle: 1.0, shoot: false }, Action::none()]);
+            state.step(&[
+                Action {
+                    yaw_input: 0.0,
+                    throttle: 1.0,
+                    shoot: false,
+                },
+                Action::none(),
+            ]);
         }
 
         // Should have wrapped to negative x
-        assert!(state.fighters[0].position.x < 0.0,
-            "Fighter should wrap to negative x, got {}", state.fighters[0].position.x);
+        assert!(
+            state.fighters[0].position.x < 0.0,
+            "Fighter should wrap to negative x, got {}",
+            state.fighters[0].position.x
+        );
     }
 
     #[test]
@@ -615,7 +639,10 @@ mod tests {
 
         state.step(&[Action::none(), Action::none()]);
 
-        assert!(!state.fighters[0].alive, "Fighter at ground level should die");
+        assert!(
+            !state.fighters[0].alive,
+            "Fighter at ground level should die"
+        );
     }
 
     #[test]
@@ -644,7 +671,10 @@ mod tests {
             }
         }
 
-        assert!(!state.fighters[0].alive, "Fighter diving into ground should die");
+        assert!(
+            !state.fighters[0].alive,
+            "Fighter diving into ground should die"
+        );
     }
 
     #[test]
@@ -660,7 +690,11 @@ mod tests {
         state.fighters[0].position = Vec2::new(490.0, 300.0);
         state.fighters[0].yaw = 0.0; // facing right
 
-        let shoot = Action { yaw_input: 0.0, throttle: 0.0, shoot: true };
+        let shoot = Action {
+            yaw_input: 0.0,
+            throttle: 0.0,
+            shoot: true,
+        };
         state.step(&[shoot, Action::none()]);
         assert!(!state.bullets.is_empty());
 
@@ -670,7 +704,9 @@ mod tests {
         }
 
         // Bullet should have wrapped to negative x
-        let bullet_x = state.bullets.iter()
+        let bullet_x = state
+            .bullets
+            .iter()
             .find(|b| b.ticks_remaining > 0)
             .map(|b| b.position.x);
         if let Some(x) = bullet_x {
@@ -687,7 +723,11 @@ mod tests {
         state.fighters[1].position = Vec2::new(-490.0, 300.0);
         state.fighters[1].yaw = std::f32::consts::PI; // facing left
 
-        let shoot = Action { yaw_input: 0.0, throttle: 0.0, shoot: true };
+        let shoot = Action {
+            yaw_input: 0.0,
+            throttle: 0.0,
+            shoot: true,
+        };
         state.step(&[shoot, Action::none()]);
 
         // Run until hit or bullet expires
@@ -697,8 +737,11 @@ mod tests {
         }
 
         // P1 should have taken damage (bullet wraps and hits)
-        assert!(state.fighters[1].hp < MAX_HP,
-            "Bullet should hit across wrap boundary. P1 HP={}", state.fighters[1].hp);
+        assert!(
+            state.fighters[1].hp < MAX_HP,
+            "Bullet should hit across wrap boundary. P1 HP={}",
+            state.fighters[1].hp
+        );
     }
 
     #[test]
@@ -709,11 +752,21 @@ mod tests {
         state.fighters[0].speed = 150.0;
         let initial_speed = state.fighters[0].speed;
 
-        state.step(&[Action { yaw_input: 0.0, throttle: 0.0, shoot: false }, Action::none()]);
+        state.step(&[
+            Action {
+                yaw_input: 0.0,
+                throttle: 0.0,
+                shoot: false,
+            },
+            Action::none(),
+        ]);
 
         // Speed should have decreased due to ceiling drain (on top of gravity)
-        assert!(state.fighters[0].speed < initial_speed,
-            "Ceiling zone should drain speed. Got {}", state.fighters[0].speed);
+        assert!(
+            state.fighters[0].speed < initial_speed,
+            "Ceiling zone should drain speed. Got {}",
+            state.fighters[0].speed
+        );
     }
 
     #[test]
@@ -726,13 +779,23 @@ mod tests {
 
         // Step for a while — should stall from speed drain
         for _ in 0..60 {
-            state.step(&[Action { yaw_input: 0.0, throttle: 0.0, shoot: false }, Action::none()]);
+            state.step(&[
+                Action {
+                    yaw_input: 0.0,
+                    throttle: 0.0,
+                    shoot: false,
+                },
+                Action::none(),
+            ]);
         }
 
         // Should have stalled or have very low speed
-        assert!(state.fighters[0].stall_ticks > 0 || state.fighters[0].speed <= STALL_SPEED,
+        assert!(
+            state.fighters[0].stall_ticks > 0 || state.fighters[0].speed <= STALL_SPEED,
             "Prolonged ceiling should cause stall. Speed={}, stall_ticks={}",
-            state.fighters[0].speed, state.fighters[0].stall_ticks);
+            state.fighters[0].speed,
+            state.fighters[0].stall_ticks
+        );
     }
 
     #[test]
@@ -744,15 +807,22 @@ mod tests {
         state.fighters[0].position = Vec2::new(0.0, 400.0); // high altitude so no ground push
 
         let actions = [
-            Action { yaw_input: 0.0, throttle: 0.0, shoot: false },
+            Action {
+                yaw_input: 0.0,
+                throttle: 0.0,
+                shoot: false,
+            },
             Action::none(),
         ];
 
         state.step(&actions);
 
         // Diving should gain speed from gravity (overcoming drag at low speed)
-        assert!(state.fighters[0].speed > 60.0,
-            "Diving should gain speed, got {}", state.fighters[0].speed);
+        assert!(
+            state.fighters[0].speed > 60.0,
+            "Diving should gain speed, got {}",
+            state.fighters[0].speed
+        );
     }
 
     #[test]
@@ -802,7 +872,9 @@ mod tests {
             if state.tick % FRAME_INTERVAL == 0 {
                 let snap = state.snapshot();
                 for p in 0..2 {
-                    if !snap.fighters[p].alive { continue; }
+                    if !snap.fighters[p].alive {
+                        continue;
+                    }
                     let dx = wrapped_rel_x(snap.fighters[p].x, prev_snap.fighters[p].x);
                     let dy = snap.fighters[p].y - prev_snap.fighters[p].y;
                     let dist = (dx * dx + dy * dy).sqrt();
@@ -845,7 +917,9 @@ mod tests {
             let prev = &replay.frames[i - 1];
             let curr = &replay.frames[i];
             for p in 0..2 {
-                if !curr.fighters[p].alive { continue; }
+                if !curr.fighters[p].alive {
+                    continue;
+                }
                 let dx = wrapped_rel_x(curr.fighters[p].x, prev.fighters[p].x);
                 let dy = curr.fighters[p].y - prev.fighters[p].y;
                 let dist = (dx * dx + dy * dy).sqrt();
@@ -876,15 +950,22 @@ mod tests {
         state.fighters[0].position = Vec2::new(0.0, 300.0);
 
         let actions = [
-            Action { yaw_input: 0.0, throttle: 0.0, shoot: false },
+            Action {
+                yaw_input: 0.0,
+                throttle: 0.0,
+                shoot: false,
+            },
             Action::none(),
         ];
 
         state.step(&actions);
 
         // Climbing should cost speed due to gravity
-        assert!(state.fighters[0].speed < 150.0,
-            "Climbing should cost speed, got {}", state.fighters[0].speed);
+        assert!(
+            state.fighters[0].speed < 150.0,
+            "Climbing should cost speed, got {}",
+            state.fighters[0].speed
+        );
     }
 
     #[test]
@@ -915,9 +996,15 @@ mod tests {
         assert!(state.fighters[0].stall_ticks > 0);
 
         // Now try to yaw hard left — should be ignored, nose should drift downward
-        let hard_left = Action { yaw_input: 1.0, throttle: 1.0, shoot: false };
+        let hard_left = Action {
+            yaw_input: 1.0,
+            throttle: 1.0,
+            shoot: false,
+        };
         for _ in 0..10 {
-            if state.fighters[0].stall_ticks == 0 { break; }
+            if state.fighters[0].stall_ticks == 0 {
+                break;
+            }
             state.step(&[hard_left, Action::none()]);
         }
 
@@ -944,7 +1031,14 @@ mod tests {
 
         // Run through stall recovery (gravity while nose-down should recover speed)
         for _ in 0..120 {
-            state.step(&[Action { yaw_input: 0.0, throttle: 1.0, shoot: false }, Action::none()]);
+            state.step(&[
+                Action {
+                    yaw_input: 0.0,
+                    throttle: 1.0,
+                    shoot: false,
+                },
+                Action::none(),
+            ]);
         }
 
         // Should have exited stall by now
@@ -965,7 +1059,11 @@ mod tests {
         assert!(state.fighters[0].stall_ticks > 0);
 
         // Try to shoot during stall
-        let shoot = Action { yaw_input: 0.0, throttle: 1.0, shoot: true };
+        let shoot = Action {
+            yaw_input: 0.0,
+            throttle: 1.0,
+            shoot: true,
+        };
         let bullets_before = state.bullets.len();
         state.step(&[shoot, Action::none()]);
 
@@ -1029,7 +1127,11 @@ mod tests {
         state.fighters[1].position = Vec2::new(50.0, 300.0);
         state.fighters[1].yaw = 0.0; // also facing right (P0 is behind P1)
 
-        let shoot = Action { yaw_input: 0.0, throttle: 0.0, shoot: true };
+        let shoot = Action {
+            yaw_input: 0.0,
+            throttle: 0.0,
+            shoot: true,
+        };
         state.step(&[shoot, Action::none()]);
 
         // Bullet should be spawned
@@ -1058,7 +1160,11 @@ mod tests {
         state.fighters[1].position = Vec2::new(50.0, 300.0);
         state.fighters[1].yaw = std::f32::consts::FRAC_PI_2; // facing up (perpendicular)
 
-        let shoot = Action { yaw_input: 0.0, throttle: 0.0, shoot: true };
+        let shoot = Action {
+            yaw_input: 0.0,
+            throttle: 0.0,
+            shoot: true,
+        };
         state.step(&[shoot, Action::none()]);
 
         let no_action = [Action::none(), Action::none()];
@@ -1083,7 +1189,11 @@ mod tests {
         state.fighters[1].position = Vec2::new(50.0, 300.0);
         state.fighters[1].yaw = std::f32::consts::PI; // facing left
 
-        let shoot = Action { yaw_input: 0.0, throttle: 0.0, shoot: true };
+        let shoot = Action {
+            yaw_input: 0.0,
+            throttle: 0.0,
+            shoot: true,
+        };
         state.step(&[shoot, Action::none()]);
 
         let no_action = [Action::none(), Action::none()];

@@ -12,4 +12,5 @@ training/
 *.onnx
 *.onnx.data
 !models/starter.onnx
+!models/submit_v2.onnx
 !crates/validator/tests/fixtures/*.onnx

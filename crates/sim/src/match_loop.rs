@@ -5,7 +5,8 @@ use crate::policy::Policy;
 
 /// Run a deterministic match between two policies.
 pub fn run_match(config: &MatchConfig, p0: &mut dyn Policy, p1: &mut dyn Policy) -> Replay {
-    let mut state = SimState::new_with_seed_and_config(config.seed, config.randomize_spawns, config.sim_config);
+    let mut state =
+        SimState::new_with_seed_and_config(config.seed, config.randomize_spawns, config.sim_config);
     let mut frames = Vec::new();
     let mut action0 = Action::none();
     let mut action1 = Action::none();
@@ -25,13 +26,13 @@ pub fn run_match(config: &MatchConfig, p0: &mut dyn Policy, p1: &mut dyn Policy)
         state.step(&[action0, action1]);
 
         // Record frame every FRAME_INTERVAL ticks
-        if state.tick % FRAME_INTERVAL == 0 {
+        if state.tick.is_multiple_of(FRAME_INTERVAL) {
             frames.push(state.snapshot());
         }
 
         if state.is_terminal() {
             // Capture final frame
-            if state.tick % FRAME_INTERVAL != 0 {
+            if !state.tick.is_multiple_of(FRAME_INTERVAL) {
                 frames.push(state.snapshot());
             }
             break;

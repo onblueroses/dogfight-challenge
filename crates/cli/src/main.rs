@@ -39,6 +39,10 @@ enum Commands {
         /// Use randomized spawn positions
         #[arg(long)]
         randomize: bool,
+
+        /// Dump observations and actions to binary file (for training data)
+        #[arg(long)]
+        dump_obs: Option<PathBuf>,
     },
 
     /// Validate an ONNX model
@@ -96,7 +100,11 @@ fn resolve_policy(name: &str) -> Box<dyn Policy> {
         "ace" => Box::new(AcePolicy::new()),
         "brawler" => Box::new(BrawlerPolicy::new()),
         path if path == "neural" || path.ends_with(".onnx") => {
-            let onnx_path = if path == "neural" { "policy.onnx" } else { path };
+            let onnx_path = if path == "neural" {
+                "policy.onnx"
+            } else {
+                path
+            };
             let p = std::path::Path::new(onnx_path);
             match OnnxPolicy::load(p) {
                 Ok(policy) => {
@@ -119,7 +127,10 @@ fn resolve_policy(name: &str) -> Box<dyn Policy> {
                         return Box::new(policy);
                     }
                     Err(e) => {
-                        eprintln!("Failed to load ONNX policy '{}': {e}", models_path.display());
+                        eprintln!(
+                            "Failed to load ONNX policy '{}': {e}",
+                            models_path.display()
+                        );
                         std::process::exit(1);
                     }
                 }
@@ -143,7 +154,8 @@ fn main() {
             seed,
             output,
             randomize,
-        } => cmd_run(&p0, &p1, seed, output, randomize),
+            dump_obs,
+        } => cmd_run(&p0, &p1, seed, output, randomize, dump_obs),
 
         Commands::Validate { model_path } => cmd_validate(&model_path),
 
@@ -160,7 +172,14 @@ fn main() {
     }
 }
 
-fn cmd_run(p0_name: &str, p1_name: &str, seed: u64, output: Option<PathBuf>, randomize: bool) {
+fn cmd_run(
+    p0_name: &str,
+    p1_name: &str,
+    seed: u64,
+    output: Option<PathBuf>,
+    randomize: bool,
+    dump_obs: Option<PathBuf>,
+) {
     let mut p0 = resolve_policy(p0_name);
     let mut p1 = resolve_policy(p1_name);
 
@@ -179,14 +198,23 @@ fn cmd_run(p0_name: &str, p1_name: &str, seed: u64, output: Option<PathBuf>, ran
         seed
     );
 
-    let replay = run_match(&config, p0.as_mut(), p1.as_mut());
+    let replay = if let Some(ref obs_path) = dump_obs {
+        // Run match with observation dumping
+        run_match_dump_obs(&config, p0.as_mut(), p1.as_mut(), obs_path)
+    } else {
+        run_match(&config, p0.as_mut(), p1.as_mut())
+    };
     let result = &replay.result;
 
     println!();
     println!("=== Match Result ===");
     println!("Outcome:    {:?}", result.outcome);
     println!("Reason:     {:?}", result.reason);
-    println!("Final tick: {} ({:.1}s)", result.final_tick, result.final_tick as f32 / TICK_RATE as f32);
+    println!(
+        "Final tick: {} ({:.1}s)",
+        result.final_tick,
+        result.final_tick as f32 / TICK_RATE as f32
+    );
     println!();
     println!("--- Stats ---");
     println!(
@@ -209,12 +237,83 @@ fn cmd_run(p0_name: &str, p1_name: &str, seed: u64, output: Option<PathBuf>, ran
     }
 }
 
+/// Run a match and dump P0's observations + actions as flat binary.
+/// Format: repeated [224 f32 obs | 3 f32 action] = 227 f32 per decision tick.
+fn run_match_dump_obs(
+    config: &MatchConfig,
+    p0: &mut dyn Policy,
+    p1: &mut dyn Policy,
+    obs_path: &Path,
+) -> Replay {
+    use dogfight_sim::physics::SimState;
+    use std::io::Write;
+
+    let mut state =
+        SimState::new_with_seed_and_config(config.seed, config.randomize_spawns, config.sim_config);
+    let mut frames = Vec::new();
+    let mut action0 = Action::none();
+    let mut action1 = Action::none();
+    let mut obs_data: Vec<f32> = Vec::new();
+
+    frames.push(state.snapshot());
+
+    for tick in 0..config.max_ticks {
+        if tick % CONTROL_PERIOD == 0 {
+            let obs0 = state.observe(0);
+            action0 = p0.act(&obs0);
+            let obs1 = state.observe(1);
+            action1 = p1.act(&obs1);
+
+            // Record P0's observation and action
+            obs_data.extend_from_slice(&obs0.data);
+            obs_data.push(action0.yaw_input);
+            obs_data.push(action0.throttle);
+            obs_data.push(if action0.shoot { 1.0 } else { 0.0 });
+        }
+
+        state.step(&[action0, action1]);
+
+        if state.tick.is_multiple_of(FRAME_INTERVAL) {
+            frames.push(state.snapshot());
+        }
+
+        if state.is_terminal() {
+            if !state.tick.is_multiple_of(FRAME_INTERVAL) {
+                frames.push(state.snapshot());
+            }
+            break;
+        }
+    }
+
+    // Write binary file
+    let bytes: Vec<u8> = obs_data.iter().flat_map(|f| f.to_le_bytes()).collect();
+    let mut file = std::fs::File::create(obs_path).expect("Failed to create obs dump file");
+    file.write_all(&bytes).expect("Failed to write obs dump");
+    let n_decisions = obs_data.len() / 227;
+    eprintln!("Dumped {} decisions to {}", n_decisions, obs_path.display());
+
+    let (outcome, reason) = state.outcome();
+    Replay {
+        config: config.clone(),
+        frames,
+        result: MatchResult {
+            outcome,
+            reason,
+            final_tick: state.tick,
+            stats: state.stats,
+        },
+    }
+}
+
 fn cmd_validate(model_path: &Path) {
     match dogfight_validator::validate_model_file(model_path) {
         Ok(report) => {
             println!("Model: {}", model_path.display());
             println!("  File size:  {} bytes", report.file_size_bytes);
-            println!("  Parameters: {} / {} (max)", report.parameter_count, MAX_PARAMETERS);
+            println!(
+                "  Parameters: {} / {} (max)",
+                report.parameter_count, MAX_PARAMETERS
+            );
             println!("  Input:      {:?}", report.input_shape);
             println!("  Output:     {:?}", report.output_shape);
             println!("  Ops:        {}", report.ops_used.join(", "));
