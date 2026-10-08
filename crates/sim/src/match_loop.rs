@@ -25,13 +25,13 @@ pub fn run_match(config: &MatchConfig, p0: &mut dyn Policy, p1: &mut dyn Policy)
         state.step(&[action0, action1]);
 
         // Record frame every FRAME_INTERVAL ticks
-        if state.tick % FRAME_INTERVAL == 0 {
+        if state.tick.is_multiple_of(FRAME_INTERVAL) {
             frames.push(state.snapshot());
         }
 
         if state.is_terminal() {
             // Capture final frame
-            if state.tick % FRAME_INTERVAL != 0 {
+            if !state.tick.is_multiple_of(FRAME_INTERVAL) {
                 frames.push(state.snapshot());
             }
             break;

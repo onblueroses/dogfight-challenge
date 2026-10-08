@@ -20,6 +20,12 @@ pub struct SimState {
     pub obs_history_count: [u32; 2],
 }
 
+impl Default for SimState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SimState {
     /// Default initial speed: above stall threshold for safe spawn.
     pub const SPAWN_SPEED: f32 = 50.0;
@@ -799,7 +805,7 @@ mod tests {
         // Run 600 ticks (5 seconds) and check every frame
         for _ in 0..600 {
             state.step(&actions);
-            if state.tick % FRAME_INTERVAL == 0 {
+            if state.tick.is_multiple_of(FRAME_INTERVAL) {
                 let snap = state.snapshot();
                 for p in 0..2 {
                     if !snap.fighters[p].alive { continue; }

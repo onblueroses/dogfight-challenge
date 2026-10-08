@@ -351,7 +351,7 @@ mod tests {
         assert!(y > 0.0 && y <= 1.0);
 
         let y = yaw_toward(-0.5, 0.0, 2.0);
-        assert!(y < 0.0 && y >= -1.0);
+        assert!((-1.0..0.0).contains(&y));
     }
 
     #[test]
