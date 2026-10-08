@@ -402,7 +402,7 @@ async fn run_interactive_human_match(socket: &mut WebSocket, req: MatchRequest) 
                     break;
                 }
 
-                if state.tick % CONTROL_PERIOD == 0 {
+                if state.tick.is_multiple_of(CONTROL_PERIOD) {
                     if let Some(policy) = p0.as_mut() {
                         p0_action = policy.act(&state.observe(0));
                     }
@@ -415,12 +415,12 @@ async fn run_interactive_human_match(socket: &mut WebSocket, req: MatchRequest) 
                 actions[human_idx] = human_action;
                 state.step(&actions);
 
-                if state.tick % FRAME_INTERVAL == 0 && send_frame(socket, &state.snapshot()).await.is_err() {
+                if state.tick.is_multiple_of(FRAME_INTERVAL) && send_frame(socket, &state.snapshot()).await.is_err() {
                     return;
                 }
 
                 if state.is_terminal() || state.tick >= match_config.max_ticks {
-                    if state.tick % FRAME_INTERVAL != 0 && send_frame(socket, &state.snapshot()).await.is_err() {
+                    if !state.tick.is_multiple_of(FRAME_INTERVAL) && send_frame(socket, &state.snapshot()).await.is_err() {
                         return;
                     }
                     break;
